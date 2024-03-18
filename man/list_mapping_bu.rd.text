@@ -27,7 +27,7 @@ cell.
       mapping.file.ggsheet = FALSE,
       job = "mk",
       job.type = "mk_type",
-      eamena.field = "target",
+      eamena.field = "EAMENA",
       eamena.id = "UNIQUEID",
       verbose = TRUE
     )

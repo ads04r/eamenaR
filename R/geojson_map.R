@@ -6,14 +6,11 @@
 #'
 #' @param map.name name of output map and name of saved file (if export.plot is TRUE). Default "map".
 #' @param geojson.path path of GeoJSON file. Default 'caravanserail.geojson'.
-#' @param geojson.grids optional. path of GeoJSON file to show also grids
 #' @param ids IDs of resources, default "EAMENA.ID" (R fieldname format, without spaces).
 #' @param field.names a vector of one or many field names for thematic cartography. If NA (default), will create a general map
 #' @param highlights.ids EAMENA IDs (ex: 'EAMENA-0205783') that will be highlighted in map. If NA (default), no highlights.
 #' @param symbology path to XLSX recording symbology for different values, default 'symbology.xlsx'.
-#' @param maptype type of background basemap, from the  basemaps:: package
-#' @param ncol the number of columns
-#' @param max.maps to limit the total number of exported maps. Default: NA.
+#' @param stamen.zoom zoom of Stamen basemap, between 0 (world, unprecise) to 21 (building, very precise). Default NA, zoom level will be calculated automatically.
 #' @param interactive if FALSE create static PNG (by  default), if TRUE create a plotly plot as HTML widget.
 #' @param export.plot if TRUE, export plot, if FALSE will only display it.
 #' @param dirOut folder where outputs will be saved. Default: '/results'. If it doesn't exist, will be created. Only useful if export plot is TRUE.
@@ -53,25 +50,17 @@
 geojson_map <- function(map.name = "map",
                         geojson.path = paste0(system.file(package = "eamenaR"),
                                               "/extdata/caravanserail.geojson"),
-                        geojson.grids = NA,
                         ids = "EAMENA ID",
                         field.names = NA,
                         highlights.ids = NA,
                         symbology = paste0(system.file(package = "eamenaR"),
                                            "/extdata/symbology.xlsx"),
-                        hp.color = "red",
-                        hp.color.bck = "grey",
-                        hp.size = 2,
-                        maptype = c("esri", "world_imagery"),
-                        # maptype = "terrain-background",
-                        # stamen.zoom = NA,
+                        stamen.zoom = NA,
                         fields.for.labels = c("Site Feature Interpretation Type",
                                               "Cultural Period Type",
                                               "Administrative Division ",
                                               "Country Type ",
                                               "Overall Condition State Type"),
-                        ncol = 4,
-                        max.maps = NA,
                         interactive = F,
                         export.plot = F,
                         dirOut = paste0(system.file(package = "eamenaR"),
@@ -81,18 +70,15 @@ geojson_map <- function(map.name = "map",
   # field.names <- "Overall Condition State Type"
   # TODO: generalise from point to other geometries: centroid Polygon, Lines
   `%>%` <- dplyr::`%>%` # used to not load dplyr
-  symbology.df <- openxlsx::read.xlsx(symbology)
-  ea.geojson <- sf::read_sf(geojson.path)
-  # sf::st_crs(ea.geojson) <- 4326
-  # sp::proj4string(ea.geojson) <- sp::CRS("+init=epsg:4326")
-  bbox <- sf::st_as_sfc(sf::st_bbox(ea.geojson))
-  # if(is.na(stamen.zoom)){
-  #   bbox <- sf::st_bbox(ea.geojson)
-  #   stamen.zoom <- rosm:::tile.raster.autozoom(
-  #     rosm::extract_bbox(
-  #       matrix(bbox, ncol = 2, byrow = TRUE)),
-  #     epsg = 4326)
-  # }
+  symbology <- openxlsx::read.xlsx(symbology)
+  ea.geojson <- geojsonsf::geojson_sf(geojson.path)
+  if(is.na(stamen.zoom)){
+    bbox <- sf::st_bbox(ea.geojson)
+    stamen.zoom <- rosm:::tile.raster.autozoom(
+      rosm::extract_bbox(
+        matrix(bbox, ncol = 2, byrow = TRUE)),
+      epsg = 4326)
+  }
   ea.geojson <- sf::st_zm(ea.geojson) # rm Z
   ea.geojson.geom.types <- sf::st_geometry_type(ea.geojson$geometry)
   # Pt, Ln, Pl
@@ -110,26 +96,19 @@ geojson_map <- function(map.name = "map",
 
   # non plolty
   if(!interactive){
-    # cast Line and polygons to points
-    ea.geojson.line.point <- sf::st_centroid(ea.geojson.line)
-    ea.geojson.polygon.point <- sf::st_centroid(ea.geojson.polygon)
-    ea.geojson.point.all <- rbind(ea.geojson.point, ea.geojson.line.point)
-    ea.geojson.point.all <- rbind(ea.geojson.point.all, ea.geojson.polygon.point)
-    # left <- as.numeric(sf::st_bbox(ea.geojson.point)$xmin)
-    # bottom <- as.numeric(sf::st_bbox(ea.geojson.point)$ymin)
-    # right <- as.numeric(sf::st_bbox(ea.geojson.point)$xmax)
-    # top <- as.numeric(sf::st_bbox(ea.geojson.point)$ymax)
-    # buffer <- mean(c(abs(left - right), abs(top - bottom)))/10
-    # bbox <- c(left = left - buffer,
-    #           bottom = bottom - buffer,
-    #           right = right + buffer,
-    #           top = top + buffer
-    # )
-
-    # stamenbck <- ggmap::get_stadiamap(bbox,
-    #                                   zoom = stamen.zoom,
-    #                                   maptype = maptype)
-
+    left <- as.numeric(sf::st_bbox(ea.geojson.point)$xmin)
+    bottom <- as.numeric(sf::st_bbox(ea.geojson.point)$ymin)
+    right <- as.numeric(sf::st_bbox(ea.geojson.point)$xmax)
+    top <- as.numeric(sf::st_bbox(ea.geojson.point)$ymax)
+    buffer <- mean(c(abs(left - right), abs(top - bottom)))/10
+    bbox <- c(left = left - buffer,
+              bottom = bottom - buffer,
+              right = right + buffer,
+              top = top + buffer
+    )
+    stamenbck <- ggmap::get_stamenmap(bbox,
+                                      zoom = stamen.zoom,
+                                      maptype = "terrain-background")
     cpt.field.name <- 0
     if(!is.na(field.names)){
       # one map by field, if there are different values for the same field: one by value
@@ -140,51 +119,18 @@ geojson_map <- function(map.name = "map",
         # field.name <- "Damage Extent Type"
         # field.name <- "Disturbance Cause Type "
         # field.name <- "Overall Condition State Type"
-        # field.name = c("Disturbance Cause Category Type")
-        # field.name = 'Infrastructure/Transport'
         # cpt.field.value <- 0
         # cpt.field.name <- cpt.field.name + 1
         # print(paste0(" ", cpt.field.name, "/",length(field.names),")    read '", field.name,"' field name"))
-
-        if(!is.na(max.maps)){
-          unic.values <- as.data.frame(table(ea.geojson.point.all[[field.name]]))
-          # summed.unic.values <- aggregate(Freq ~ Var1, data = unic.values, sum)
-
-          df.val.simple <- data.frame(val = character(),
-                                      nb = numeric())
-          for (i in 1:nrow(unic.values)){
-            # i <- 2
-            nb <- unic.values[i, "Freq"]
-            values <- unic.values[i, "Var1"]
-            values <- unlist(stringr::str_split(values, ","))
-            values <- trimws(values) # trim spaces
-            values <- values[values != ""] # rm empty strings
-            for (j in 1:length(values)){
-              df.val.simple[nrow(df.val.simple) + 1,] = c(values[j], nb)
-            }
-          }
-          df.val.simple$nb <- as.numeric(df.val.simple$nb)
-          # df.periods.simple$period <- trimws(df.periods.simple$period) # trim spaces
-          df.val.simple <- aggregate(nb ~ val, data = df.val.simple, sum)
-          df.val.simple <- df.val.simple[order(df.val.simple$nb, decreasing = TRUE), ]
-          # max.maps <- 9
-          df.val.simple <- df.val.simple[c(1:max.maps), ]
-          aggregated.unique.values <- unique(ea.geojson.point.all[[field.name]])
-          splitted.values <- stringr::str_split(aggregated.unique.values, ", ")
-          different.values.in.the.field <- Reduce("|", unlist(lapply(splitted.values, length)) > 1)
-          splitted.unique.values <- df.val.simple$val
-        } else {
-          aggregated.unique.values <- unique(ea.geojson.point.all[[field.name]])
-          splitted.values <- stringr::str_split(aggregated.unique.values, ", ")
-          different.values.in.the.field <- Reduce("|", unlist(lapply(splitted.values, length)) > 1)
-          if(different.values.in.the.field){
-            splitted.unique.values <- unique(unlist(splitted.values))
-            splitted.unique.values <- as.character(na.omit(splitted.unique.values))
-          }
+        aggregated.unique.values <- unique(ea.geojson.point[[field.name]])
+        splitted.values <- stringr::str_split(aggregated.unique.values, ", ")
+        different.values.in.the.field <- Reduce("|", unlist(lapply(splitted.values, length)) > 1)
+        if(different.values.in.the.field){
+          splitted.unique.values <- unique(unlist(splitted.values))
+          splitted.unique.values <- as.character(na.omit(splitted.unique.values))
         }
         # print(paste0("*       - there is/are ", length(splitted.unique.values)," different field values to read"))
-        # symbology.df <- openxlsx::read.xlsx(symbology)
-        symbology.field <- symbology.df[symbology.df$list == field.name, c("values", "hexa")]
+        symbology.field <- symbology[symbology$list == field.name, c("values", "colors")]
         if(nrow(symbology.field) == 0){
           # default colors
           coloramp <- rev(RColorBrewer::brewer.pal(11, "Spectral"))
@@ -193,129 +139,65 @@ geojson_map <- function(map.name = "map",
                                         colors = colors)
         }
         names(symbology.field)[names(symbology.field) == 'values'] <- field.name
-        # sf::st_crs(ea.geojson.point.all) <- 4326
-        # print(ea.geojson.point.all)
-        # sf::st_transform(ea.geojson.point.all, crs = "ESRI:3857")
-        # xxx <- ea.geojson.point.all
-        # - - - - - - - - - - - - - -- - - - -
-        ## basemaps creates: R Session aborted
-        # ea.geojson.point.all <- sf::st_transform(ea.geojson.point.all, crs = 3857)
-        # bbox <- sf::st_transform(bbox, crs = 3857)
-        # basemaps::set_defaults(map_service = "osm", map_type = "topographic")
-        # basemaps::set_defaults(map_service = maptype[1], map_type = maptype[2])
-        # - - - - - - - - - - - - - - - - - - -
+
         if(different.values.in.the.field){
           # as many maps as there are different values
-          all.g <- list()
-          cpt.field.value <- 0
-          splitted.unique.values <- splitted.unique.values[!splitted.unique.values %in% c("")]
           for(field.value in splitted.unique.values){
-            # splitted.unique.values <- splitted.unique.values[1:5]
             # field.value <- "Water and/or Wind Action"
-            # field.value <- "Agricultural/Pastoral"
             cpt.field.value <- cpt.field.value + 1
             print(paste0("        ", cpt.field.value, "/",
                          length(splitted.unique.values),")    read '",
                          field.value,"' field value"))
-            ea.geojson.point.sub <- ea.geojson.point.all[grep(field.value, ea.geojson.point.all[[field.name]]), ]
+            ea.geojson.point.sub <- ea.geojson.point[grep(field.value, ea.geojson.point[[field.name]]), ]
             ea.geojson.point.sub <- merge(ea.geojson.point.sub,
                                           symbology.field, by = field.name,
                                           all.x = T)
-            ggmap::register_stadiamaps("aa5c9739-90c7-410b-9e9b-6c904df6e4dd")
-            if(is.na(geojson.grids)[1]){
-              # no grids to plot
-              buff <- .1
-              left <- as.numeric(sf::st_bbox(ea.geojson.point.sub)$xmin)
-              left.L <- left - buff # floor(left)
-              bottom <- as.numeric(sf::st_bbox(ea.geojson.point.sub)$ymin)
-              bottom.L <- bottom - buff #floor(bottom)
-              right <- as.numeric(sf::st_bbox(ea.geojson.point.sub)$xmax)
-              right.L <- right + buff # ceiling(right)
-              top <- as.numeric(sf::st_bbox(ea.geojson.point.sub)$ymax)
-              top.L <- top + buff # ceiling(top)
-            } else {
-              buff <- .05
-              geojson.grids <- sf::read_sf(geojson.grids)
-              left <- as.numeric(sf::st_bbox(ea.geojson.grids)$xmin)
-              left.L <- left - buff # floor(left)
-              bottom <- as.numeric(sf::st_bbox(ea.geojson.grids)$ymin)
-              bottom.L <- bottom - buff #floor(bottom)
-              right <- as.numeric(sf::st_bbox(ea.geojson.grids)$xmax)
-              right.L <- right + buff # ceiling(right)
-              top <- as.numeric(sf::st_bbox(ea.geojson.grids)$ymax)
-              top.L <- top + buff # ceiling(top)
-            }
-            stamenbck <- get_stadiamap(bbox = c(left = left.L,
-                                                bottom = bottom.L,
-                                                right = right.L,
-                                                top = top.L),
-                                       maptype = "stamen_terrain_background",
-                                       crop = TRUE,
-                                       zoom = 9)
-            ea.geojson.point.sub$colors[is.na(ea.geojson.point.sub$colors)] <- hp.color.bck
-            tit <- paste0(field.value, " (n=", as.character(nrow(ea.geojson.point.sub)), ")")
+            ea.geojson.point.sub$colors[is.na(ea.geojson.point.sub$colors)] <- "#808080"
             if(nrow(ea.geojson.point.sub) > 0){
               gmap <- ggmap::ggmap(stamenbck) +
-                ggplot2::ggtitle(tit)
-              if(!is.na(geojson.grids)[1]){
-                gmap <- gmap +
-                  ggplot2::geom_sf(data = ea.geojson.grids,
-                                    color = "grey", fill = NA,
-                                    # ggplot2::aes(),
-                                    inherit.aes = FALSE)
-              }
-              gmap <- gmap +
-                # ggplot2:: geom_sf(data = ea.geojson, fill = 'red',
-                #                   inherit.aes = FALSE) +
-                # gmap <- ggmap::ggmap(stamenbck) +
-                # gmap <- ggplot2::ggplot() +
-                # basemaps::basemap_gglayer(bbox) +
-                ggplot2::geom_sf(data = ea.geojson.point.all,
-                                 ggplot2::aes(color = hp.color.bck),
-                                 size = hp.size,
+                ggplot2::geom_sf(data = ea.geojson.point,
+                                 ggplot2::aes(color = "grey"),
                                  inherit.aes = FALSE) +
                 ggplot2::geom_sf(data = ea.geojson.point.sub,
-                                 ggplot2::aes(color = hp.color),
-                                 size = hp.size,
+                                 ggplot2::aes(color = "red"),
                                  inherit.aes = FALSE) +
-                ggplot2::scale_color_identity(# guide = "legend",
-                  name = field.name,
-                  label = c("other", field.value)) +
-                # ggplot2::scale_fill_identity() +
-                # ggplot2::coord_sf() +
-                # ggplot2::labs(title = field.value) +
-                # subtitle = paste0(field.name, " = ", field.value)) +
-                ggplot2::scale_x_continuous(breaks = seq(floor(left), ceiling(right), by = .5)) +
-                ggplot2::scale_y_continuous(breaks = seq(floor(bottom), ceiling(top), by = .5)) +
-                ggplot2::theme(plot.title = ggplot2::element_text(size = 10,
+                ggrepel::geom_text_repel(data = ea.geojson.point.sub,
+                                         ggplot2::aes(x = sf::st_coordinates(ea.geojson.point.sub)[, "X"],
+                                                      y = sf::st_coordinates(ea.geojson.point.sub)[, "Y"],
+                                                      label = idf),
+                                         size = 2,
+                                         segment.color = "black",
+                                         segment.size = .1,
+                                         segment.alpha = .5,
+                                         min.segment.length = .3,
+                                         force = .5,
+                                         max.time = 1.5,
+                                         max.overlaps = Inf,
+                                         inherit.aes = FALSE) +
+                ggplot2::scale_color_identity(guide = "legend",
+                                              name = field.name,
+                                              label = c("other", field.value)) +
+                ggplot2::labs(title = map.name,
+                              subtitle = paste0(field.name, " = ", field.value)) +
+                ggplot2::theme(plot.title = ggplot2::element_text(size = 15,
                                                                   hjust = 0.5),
-                               axis.title = ggplot2::element_blank())
-              # add to list
-              all.g[[length(all.g) + 1]] <- gmap
-              if (!export.plot) {
+                               plot.subtitle = ggplot2::element_text(size = 12,
+                                                                     hjust = 0.5))
+              if (export.plot) {
+                dir.create(dirOut, showWarnings = FALSE)
+                field.value.norm <- gsub("/", "_", field.value)
+                field.value.norm <- gsub(" ", "_", field.value.norm)
+                field.value.norm <- gsub("%", "perc", field.value.norm)
+                gout <- paste0(dirOut, map.name, "_", field.name, "_",
+                               field.value.norm, ".png")
+                ggplot2::ggsave(gout, gmap,
+                                width = fig.width,
+                                height = fig.height)
+                print(paste(gout, "is exported"))
+              } else {
                 print(gmap)
               }
             }
-          }
-          if (export.plot) {
-            dir.create(dirOut, showWarnings = FALSE)
-            field.name.norm <- gsub("/", "_", field.name)
-            field.name.norm <- gsub(" ", "_", field.name.norm)
-            field.name.norm <- gsub("%", "perc", field.name.norm)
-            gout <- paste0(dirOut, map.name, "_", field.name.norm, ".png")
-            margin <- ggplot2::theme(plot.margin = ggplot2::unit(c(0,0,0,0), "cm"))
-            ggplot2::ggsave(file = gout,
-                            gridExtra::arrangeGrob(top = field.name,
-                                                   grobs = lapply(all.g, "+", margin), ncol = ncol),
-                            width = fig.width,
-                            height = fig.height)
-
-            # change to grid arrange
-            gout <- paste0(dirOut, map.name, ".png")
-            ggplot2::ggsave(gout, gmap,
-                            width = fig.width,
-                            height = fig.height)
-            print(paste(gout, "is exported"))
           }
         }
 
@@ -324,10 +206,7 @@ geojson_map <- function(map.name = "map",
           ea.geojson.point <- merge(ea.geojson.point, symbology.field, by = field.name, all.x = T)
           ea.geojson.point$colors[is.na(ea.geojson.point$colors)] <- "#808080"
           if(nrow(ea.geojson.point) > 0){
-
-            # gmap <- ggmap::ggmap(stamenbck) +
-            gmap <- ggplot2::ggplot() +
-              basemaps::basemap_gglayer(bbox) +
+            gmap <- ggmap::ggmap(stamenbck) +
               ggplot2::geom_sf(data = ea.geojson.point,
                                ggplot2::aes(color = colors),
                                # colour = "black",
@@ -370,10 +249,7 @@ geojson_map <- function(map.name = "map",
     } else {
       # general map
       ea.geojson.point.sub <- ea.geojson.point
-
-      # gmap <- ggmap::ggmap(stamenbck) +
-      gmap <- ggplot2::ggplot() +
-        basemaps::basemap_gglayer(bbox) +
+      gmap <- ggmap::ggmap(stamenbck) +
         ggplot2::geom_sf(data = ea.geojson.point.sub,
                          colour = "black",
                          inherit.aes = FALSE) +
